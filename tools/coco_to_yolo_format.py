@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Author: Serena Mou
+Author: Serena Mou (Modified by LO)
 Created: 23 July 2024
 
 ===
@@ -17,32 +17,19 @@ import glob
 import csv
 import sys
 import argparse
-
+from pathlib import Path
 
 class COCO2YOLOBB():
     def __init__(self, json_file, save_location):
-
-        # load in the json file
-        #json_file = "/home/serena/Data/SCTLD/RAW/1_100/annotations/instances_default.json" 
-        #f = open(json_file)
-
-        #self.data = json.load(f)
-        self.in_files = json_file #"/home/serena/Data/SCTLD/RAW/"
-        self.save_location = save_location #"/home/serena/Data/SCTLD/Processed/"
+        self.in_files = json_file
+        self.save_location = save_location
 
     def get_info(self, data):
-
-        # given the json file, return lists of:
-        # all the classes
-        # all the image filenames
-        # class of each annot (STARTS FROM 1) (length of number of annots)
-        # image ids - a list associating each annotation with the image (length of number of annots)
-        
+        """Extract information from COCO format data"""
         try:
             # List all the classes
             categories = data["categories"]
             classes = [category["name"] for category in categories]
-            # print("all classes: ", len(classes), "\n")
             
             # List all the image filenames
             images = data["images"]
@@ -55,235 +42,163 @@ class COCO2YOLOBB():
             
             # For each annotation, get the class, image ID and the bbox
             annotations = data["annotations"]
-
             cls = [int(annotation["category_id"])-1 for annotation in annotations]
             img_ids = [int(annotation["image_id"])-1 for annotation in annotations]
             bbxs = [annotation["bbox"] for annotation in annotations]
-            im_sz = [annotation["segmentation"]["size"] for annotation in annotations]
-            # print(classes, img_names, cls, img_ids, bbxs, im_sz)
-        except:
-            print("ERROR: json file in wrong format - check it is downloaded from CVAT in COCO 1.0 format, from Segment Anything mask labels. ") 
-        return classes, img_names, cls, img_ids, bbxs, im_sz
-    
-
-
+            
+            # Handle both SAM and regular COCO formats
+            im_sz = []
+            for annotation in annotations:
+                if "segmentation" in annotation and isinstance(annotation["segmentation"], dict) and "size" in annotation["segmentation"]:
+                    im_sz.append(annotation["segmentation"]["size"])
+                else:
+                    # Use image size if segmentation size not available
+                    img_id = int(annotation["image_id"]) - 1
+                    im_sz.append([images[img_id]["height"], images[img_id]["width"]])
+            
+            return classes, img_names, cls, img_ids, bbxs, im_sz
+            
+        except Exception as e:
+            print(f"ERROR processing COCO format: {str(e)}")
+            print("Check that the JSON file is in COCO 1.0 format.")
+            raise
 
     def write_yaml(self, classes):
-        # generate yaml file with each class name
-        yaml_path = os.path.join(self.save_location,"data.yaml")
-        test_yaml_path = os.path.join(self.save_location,"test.yaml")
+        """Generate YAML files without prompting for overwrites"""
+        yaml_path = os.path.join(self.save_location, "data.yaml")
+        test_yaml_path = os.path.join(self.save_location, "test.yaml")
 
-        if os.path.isfile(yaml_path):
-            ow = input("data.yaml already exists at %s. Overwrite? Y/N "%(yaml_path))
-            if ow.lower() == "y":
-                print("Overwriting data.yaml")
-            else:
-                sys.exit("ERROR: Not overwriting data.yaml. Please select different save path without exisiting yaml file.")
-        
-        if os.path.isfile(test_yaml_path):
-            ow1 = input("test.yaml already exists at %s. Overwrite? Y/N "%(yaml_path))
-            if ow.lower() == "y":
-                print("Overwriting test.yaml")
-            else:
-                sys.exit("ERROR: Not overwriting test.yaml. Please select different save path without exisiting yaml file.")
-  
-
-        # dictionary of {0: class0, 1: class1...}
+        # Dictionary of {0: class0, 1: class1...}
         cls_dict = {k:v for k,v in enumerate(classes)}
 
         data = {
-            "path":self.save_location,
+            "path": self.save_location,
             "train": "train",
             "val": "valid",
             "names": cls_dict
         }
 
         test = {
-            "path":self.save_location,
+            "path": self.save_location,
             "train": "train",
             "val": "test",
             "names": cls_dict
         }
-
 
         with open(yaml_path, 'w') as outfile:
             yaml.dump(data, outfile, sort_keys=False)
 
         with open(test_yaml_path, 'w') as outfile:
             yaml.dump(test, outfile, sort_keys=False)
-  
-    def write_label_summary(self, summary_dict):
-        csv_path = os.path.join(self.save_location,"label_summary.csv")
-
-
-        with open(csv_path, 'w') as outfile:
-            writer = csv.writer(outfile)
-            for key, value in summary_dict.items():
-                writer.writerow([key,value])
-
 
     def bbx_converter(self, bbx_raw, im_sz):
-        # given a bounding box in pixel format [x top left, y top left, width, height]
-        # return in yolo format in normalised to image size [x middle, y middle, width, height]
-        [xl, yl, w, h] = bbx_raw
-        [fh, fw] = im_sz
-        xn = (xl + (w/2))/fw
-        yn = (yl + (h/2))/fh
-        wn = (w/fw)
-        hn = (h/fh)
-
-        return [xn, yn, wn, hn]
+        """Convert COCO format bounding box to YOLO format with validation"""
+        try:
+            [xl, yl, w, h] = bbx_raw
+            [fh, fw] = im_sz
+            
+            # Validate inputs
+            if fw <= 0 or fh <= 0:
+                raise ValueError(f"Invalid image dimensions: {fw}x{fh}")
+            if w <= 0 or h <= 0:
+                raise ValueError(f"Invalid box dimensions: {w}x{h}")
+            
+            # Convert to YOLO format (normalized)
+            xn = (xl + (w/2))/fw
+            yn = (yl + (h/2))/fh
+            wn = (w/fw)
+            hn = (h/fh)
+            
+            # Validate outputs
+            if not (0 <= xn <= 1 and 0 <= yn <= 1 and 0 <= wn <= 1 and 0 <= hn <= 1):
+                raise ValueError(f"Normalized coordinates out of range: {xn}, {yn}, {wn}, {hn}")
+            
+            return [xn, yn, wn, hn]
+        except Exception as e:
+            print(f"Error converting bounding box {bbx_raw} with image size {im_sz}: {str(e)}")
+            raise
 
     def write_txt(self, classes, img_names, cls, img_ids, bbxs, im_sz, loop):
-        
-        # location to save labels
-        out_folder = os.path.join(self.save_location,"all_labels")
-        if loop == 0:
-            if not os.path.isdir(out_folder):
-                os.mkdir(out_folder)
-            else:
-                ow = input("WARNING: Folder %s already exists. Overwrite contents? Y/N "%(out_folder))
-                if ow.lower() == "y":
-                    print("Overwriting labels")
-                else:
-                    sys.exit("ERROR: Not overwriting, use different path in --save argument")
+        """Write YOLO format annotation files"""
+        out_folder = os.path.join(self.save_location, "all_labels")
+        os.makedirs(out_folder, exist_ok=True)
 
-            # for each image, write a textfile of name image_name.txt
-            # for each annotation in the image, write
-            # class, bb centre x, bb centre y, bb w, bb h 
-            
-            # write data.yaml and test.yaml
+        if loop == 0:
             self.write_yaml(classes)
 
-        
         for i, name in enumerate(img_names):
-            # textfile name 
-            get_name_str = name.split('.')
-            if len(get_name_str)>2:
-                print("Image name not able to be processed")
-                print(name)
-            else:
-                out_txt_name = get_name_str[0]+'.txt'
-                # print(out_txt_name)
+            try:
+                # Use pathlib for reliable filename handling
+                path = Path(name)
+                out_txt_name = path.stem + '.txt'
+                
+                # Get all annotations for this image
+                all_im_idx = [j for j in range(len(img_ids)) if img_ids[j] == i]
+                lines = []
 
-            # get the indexes of all annotations in this image
-            all_im_idx = [j for j in range(len(img_ids)) if img_ids[j] == i]
-            # print(img_ids)
-            # print(cls)
-            # print(out_txt_name, all_im_idx)
-            
-            # list of lines for each text file consisting of class, x, y, w, h (normalised)
-            lines = []
+                for idx in all_im_idx:
+                    try:
+                        idx_class = cls[idx]
+                        bbox = self.bbx_converter(bbxs[idx], im_sz[idx])
+                        lines.append((idx_class, *bbox))
+                    except Exception as e:
+                        print(f"Warning: Skipping annotation for image {name}, index {idx}: {str(e)}")
+                        continue
 
-            for idx in all_im_idx:
-                # print(idx, cls, mapping)
-                # if classes are being remapped then use the mapping (dict) to find new class
-                idx_class = cls[idx] 
-                #print(cls,idx)
-                [xn, yn, wn, hn] = self.bbx_converter(bbxs[idx], im_sz[idx])
-                lines.append((idx_class, xn, yn, wn, hn))
+                # Write annotations to file
+                out_path = os.path.join(out_folder, out_txt_name)
+                with open(out_path, 'w') as f:
+                    for line in lines:
+                        write_line = "%d %0.4f %0.4f %0.4f %0.4f" % line
+                        f.write("%s\n" % write_line)
+                
+            except Exception as e:
+                print(f"Warning: Failed to process image {name}: {str(e)}")
+                continue
 
-            
-            out_path = os.path.join(out_folder,out_txt_name) 
-
-            # if os.path.isfile(out_path):
-            #     print("FILE %s ALREADY EXISTS. CONTINUE?" % out_path)
-            #     input()
-
-            # write to file
-            with open(out_path,'w') as f:
-                for line in lines:
-                    write_line = "%d %0.4f %0.4f %0.4f %0.4f"%line
-                    # print(write_line)
-                    f.write("%s\n"%write_line)
-        
-            
-                    
-
-    def label_summary(self, classes, img_names, img_ids, cls, summary_dict):
-        #print(classes, img_names, cls)
-        for i in classes:
-            if i not in summary_dict:
-                summary_dict[i] = 0
-
-        for i, cls_idx in enumerate(cls): 
-            summary_dict[classes[cls_idx]] +=1
-
-            # if classes[cls_idx-1] == "remove_Orbicellla_y_SCTLD":
-            #         print(img_names[img_ids[i]-1])
-
-        #print(cls)
-        #input()
-    
     def run(self):
+        """Main conversion process"""
+        try:
+            # Handle single JSON file
+            if os.path.isfile(self.in_files):
+                all_in = [self.in_files]
+            else:
+                try:
+                    all_in = glob.glob(self.in_files)
+                except Exception as e:
+                    print(f"ERROR: Failed to process input path pattern: {str(e)}")
+                    return
 
+            if not all_in:
+                print("ERROR: No input files found")
+                return
 
-        all_in = []
-        # check if the input is a single json file or a regex
-        if os.path.isfile(self.in_files):
-            all_in.append(self.in_files) # glob.glob(self.in_files+'Labels/*/*/*.json')
-        else:
-            try:
-                all_in = glob.glob(self.in_files)
-            except:
-                print("ERROR: regex to multiple jsons failed")
+            # Process each JSON file
+            for i, data_path in enumerate(all_in):
+                try:
+                    with open(data_path, 'r') as f:
+                        data = json.load(f)
+                    
+                    classes, img_names, cls, img_ids, bbxs, im_sz = self.get_info(data)
+                    self.write_txt(classes, img_names, cls, img_ids, bbxs, im_sz, i)
+                    
+                except Exception as e:
+                    print(f"ERROR processing {data_path}: {str(e)}")
+                    continue
 
-
-        summary_dict = {}
-        # For each json file
-        for i,data_path in enumerate(all_in):
-            #print(all_in)
-            # print(data_path)
-            try:
-                f = open(data_path)
-                data = json.load(f)
-            except:
-                print("ERROR: json failed to load")
-            # extract the info
-            classes, img_names, cls, img_ids, bbxs, im_sz = self.get_info(data)
-            # print(classes)
-            # print(img_names)
-            # input()
-            ## For the first run, generate the class merger file            
-
-            self.write_txt(classes, img_names, cls, img_ids, bbxs, im_sz, i)
-
-            # self.write_txt(img_names, cls, img_ids, bbxs, im_sz, mapping)
-            
-            ## Label summary
-            # self.label_summary(classes, img_names, img_ids, cls, summary_dict)
-            # self.write_label_summary(summary_dict) 
-            
-            ## Use this section to move the images that are referenced in the jsons 
-            # for img_name in img_names:
-            #     src = os.path.join(images_path,img_name)
-            #     if os.path.isfile(src):
-            #         dest = os.path.join(self.save_location,"training/all_images",img_name)
-            #         shutil.copy2(src,dest)
-            #     else: print("not a file", src)
-        
-        # print(summary_dict)
-
-def arg_parse():
-    parser = argparse.ArgumentParser(description='Convert from COCO SAM annotation to YOLO format')
-
-    parser.add_argument("--json", dest = "json_file",
-            help = "Path to JSON file or regex to JSON files", default = None, type = str, required=True)
-    
-    parser.add_argument("--save", dest = "save_location",
-            help = "Path to save labels", default = None, type = str, required=True)
-    
-    return parser.parse_args()
-
+        except Exception as e:
+            print(f"ERROR in conversion process: {str(e)}")
+            raise
 
 def main():
-    args = arg_parse()
+    parser = argparse.ArgumentParser(description='Convert from COCO SAM annotation to YOLO format')
+    parser.add_argument("--json", dest="json_file", help="Path to JSON file or regex to JSON files", required=True)
+    parser.add_argument("--save", dest="save_location", help="Path to save labels", required=True)
+    args = parser.parse_args()
 
-    #json_file = input("Path to JSON file or regex to files: ")
-    #save_location = input("Path to save labels: ")
-    test = COCO2YOLOBB(args.json_file, args.save_location)
-    test.run()
-    print("DONE")
+    converter = COCO2YOLOBB(args.json_file, args.save_location)
+    converter.run()
+    print("Conversion complete")
 
-if __name__=='__main__':
+if __name__ == '__main__':
     main()

@@ -10,6 +10,7 @@ Clone this repository
 *If you have an existing conda installation, skip this step*
 
 Follow instructions for your platform https://docs.anaconda.com/miniconda/
+(want to install from command line!!!)
 
 ### Create conda environment and install ultralytics
 As per https://docs.ultralytics.com/quickstart/#install-ultralytics 
@@ -166,93 +167,115 @@ python tools/label_studio_convert.py --src /Downloads/<unzipped label studio fol
 
 ## 1.5. (Optional) Merge Classes
 
-If classes need to be merged, use this script. Skip if original classes are suitable for your needs. There are two functionalities.
+If you need to merge or remap classes, use this script. There are three ways to do this:
 
-- Generate class_merger.yaml. If one is not existing, the code will generate one to be edited. 
-- Merge classes based on a class_merger.yaml file. 
+1. Using class_lister.py (Recommended)
+2. Direct dictionary input (Legacy support)
+3. Manual YAML workflow
 
-**Example Use**
-
-```bash
-# Run merging script to generate class_merger.yaml
-python tools/merge_classes.py --save <path to Dataset>/merged_Animals/ --data <path to Dataset>/data.yaml --newclasses alive,not_alive
-
-# The script will prompt:
-Do you need to generate a merger file (G) or merge classes from existing class_merger.yaml (M)? G
-# Type "G" and Enter
-```
-
-See below for how to correctly edit class_merger.yaml
+### Using class_lister.py (Recommended)
+This is the most user-friendly method. First, generate a class mapping template:
 
 ```bash
-# Run merging script to merge classes
-python tools/merge_classes.py --save <path to Dataset>/merged_Animals/ --merge <path to Dataset>/merged_Animals/class_merger.yaml --labels_in <path to Dataset>/all_labels 
-
-# The script will prompt:
-Do you need to generate a merger file (G) or merge classes from existing class_merger.yaml (M)? M
-# Type "M" and Enter
+# Generate a class mapping template from your instances.json
+python tools/class_lister.py --json path/to/instances.json --output class_mapping.txt
 ```
 
-
-**Options**
-- ```--save str``` Path to a folder to save to. If it is the same as labels_in, the label files will be overwritten. 
-- ```--data str``` Path to data.yaml file from CVAT YOLO download or generated from coco_to_yolo_format.py. This contains all the "old_classes".
-- ```--newclasses str``` The class names to be merged to, separated by commas. Ex: cls0,cls1,cls2.
-- ```--merge str``` Path to merge yaml file
-- ```--labels_in str``` Path to label files to be merged
-
-**Outputs**
-    
-For "generate a merger file (G)" option: 
-- ```<save>/class_merger.yaml/``` File to help merging of classes. See below on how to correctly edit this file.
-
-For "merge classes from existing class_merger.yaml (M)" option:
-
-- ```<save>/all_labels/``` Folder in --save with all label files where the class has been updated according to class_merger.yaml.
-- ```<save>/data.yaml``` File with the data information for training with updated new classes.
-- ```<save>/data.yaml``` File with the data information for testing with updated new classes.
-
-
-### Editing a class_merger.yaml
-To associate an "old_class" to a "new_class", add the number associated to the new class at the end of the line. For example, the examples/class_merger.yaml should be edited to:
-
-<table>
-<tr>
-<th> Before </th>
-<th> After </th>
-</tr>
-<tr>
-<td>
-
-```yaml
-new_classes:
-  0: alive
-  1: not_alive
-old_classes:
-  0: dog
-  1: cat
-  2: person
-  3: laptop
+This will create a text file with your current classes and space to specify mappings:
 ```
-</td>
-<td>
-
-```yaml
-new_classes:
-  0: alive
-  1: not_alive
-old_classes:
-  0: dog,0
-  1: cat,0
-  2: person,0
-  3: laptop,1
+# Class Mapping Configuration
+# Generated: 2024-03-25 10:30:15
+# 
+# Class ID | Current Class Name | Map To Class | New Class Label
+# --------------------------------------------------------
+# 0        | dog               | __________ | __________
+# 1        | cat               | __________ | __________
+# 2        | person            | __________ | __________
 ```
 
-</td>
-</tr>
-</table>
+Edit this file to specify your mappings:
+1. In "Map To Class": Enter the new class ID or 'remove' to exclude
+2. In "New Class Label": Enter a descriptive name for new classes
 
-Save the yaml file and rerun tools/coco_to_yolo_format.py, this time providing the path to the edited class_merger.yaml
+For example:
+```
+# Class ID | Current Class Name | Map To Class | New Class Label
+# 0        | dog               | 1            | animals
+# 1        | cat               | 1            | animals
+# 2        | person            | 2            | people
+```
+
+Then run the merge. You have two options for handling images:
+
+1. Using default directory structure:
+   ```
+   dataset/
+   ├── all_labels/
+   └── all_images/
+   ```
+   ```bash
+   python tools/merge_classes.py --save <output path> --labels_in <path to labels> --mapping class_mapping.txt
+   ```
+
+2. Specifying custom images directory:
+   ```bash
+   python tools/merge_classes.py --save <output path> --labels_in <path to labels> --mapping class_mapping.txt --images_in <path to images>
+   ```
+
+The script will:
+- Process label files according to your mapping
+- Copy corresponding images to the output directory
+- Create data.yaml and test.yaml with updated class configuration
+- Generate class_merger.yaml documenting the mapping
+
+### Legacy Methods
+
+#### Direct dictionary input
+For backwards compatibility, you can still use the dictionary format:
+
+```bash
+# Run merging script with class dictionary
+python tools/merge_classes.py --save <output path> --labels_in <path to labels> --class_dict <path to mapping file>
+```
+
+The class mapping file should contain a Python dictionary:
+```python
+class_change = {
+    '0': '1',    # Map class 0 to new class 1
+    '1': '1',    # Map class 1 to new class 1
+    '2': '2',    # Map class 2 to new class 2
+    '3': '-1',   # Remove class 3
+}
+```
+
+#### Manual YAML workflow
+For advanced users who prefer working directly with YAML:
+
+**Generate class_merger.yaml:**
+```bash
+python tools/merge_classes.py --save <output path> --data <path to data.yaml> --newclasses class0,class1,class2
+```
+
+**Merge using existing class_merger.yaml:**
+```bash
+python tools/merge_classes.py --save <output path> --merge <path to class_merger.yaml> --labels_in <path to labels>
+```
+
+### Common Options
+- ```--save str``` Output path for merged labels and configuration
+- ```--labels_in str``` Path to directory containing label files
+- ```--mapping str``` Path to class mapping text file (from class_lister.py)
+- ```--class_dict str``` Path to Python dictionary file (legacy format)
+- ```--merge str``` Path to existing class_merger.yaml
+- ```--data str``` Path to data.yaml containing original classes
+- ```--newclasses str``` New class names for YAML workflow
+
+### Outputs
+For all methods:
+- ```<save>/all_labels/``` Processed label files with updated class IDs
+- ```<save>/data.yaml``` Training configuration with updated classes
+- ```<save>/test.yaml``` Testing configuration with updated classes
+- ```<save>/class_merger.yaml``` Generated merger configuration
 
 ---
 ## 2. Split data
@@ -280,7 +303,6 @@ To process the data into train/validate/test splits for YOLO, data needs to be i
 For model training the combined data sets need to be split into training, validation and testing - YOLO tools expect the following structure:
 ```
 └──/Dataset/
-    
     ├──/train
 	    ├──/images
 	    └──/labels
@@ -290,28 +312,58 @@ For model training the combined data sets need to be split into training, valida
     └──/test/
 	    ├──/images
 	    └──/labels
+    ├── data.yaml    # Training configuration
+    └── test.yaml    # Testing configuration
 ```
-The `bal_train_test_split.py` tool faciliates this, with a set random seed to repeatably generate splits given the same inputs. The tool attempts to preserve class ratios present in inputs, see `train_test_split.py` for original version that did not implement this.
+
+The `bal_train_test_split.py` tool facilitates this split with several key features:
+- **Stratified Sampling**: Maintains class distribution ratios across splits for balanced representation
+- **Class Validation**: Ensures each class has sufficient samples (default min: 10)
+- **Progress Tracking**: Visual progress bars and detailed statistics
+- **Reproducibility**: Uses fixed random seed for consistent results
+- **Fallback Mechanism**: Gracefully handles edge cases with random split if stratification fails
+- **Automatic YAML Generation**: Creates properly configured data.yaml and test.yaml files
+- **Class Discovery**: Automatically detects and configures class information from labels
 
 **Example usage:**
-```
+```bash
+# Basic usage with default parameters (outputs to same directory as source)
 python tools/bal_train_test_split.py --src /Dataset --valid 0.2 --test 0.1
+
+# Specify custom output directory
+python tools/bal_train_test_split.py --src /Dataset --out /Output/Dataset_Split --valid 0.2 --test 0.1
+
+# Advanced usage with all options
+python tools/bal_train_test_split.py --src /Dataset --out /Output/Dataset_Split --valid 0.2 --test 0.1 --min_samples 15 --rand 42 --dump 5
 ```
 
 **Options:**
 - `--src str` Source folder to search, expects `/src/all_images`, `/src/all_labels`
-- `--valid float` Percentage of dataset to use for validation `default=0.2`
-- `--test float` Percentage of dataset to use for testing `default=None`
-- `--dump int` Optionally remove n unlabelled images from dataset `default=None`
-
+- `--out str` Output directory for splits (default: same as source)
+- `--valid float` Percentage of dataset to use for validation (default=0.2)
+- `--test float` Percentage of dataset to use for testing (default=None)
+- `--min_samples int` Minimum samples required per class (default=10)
+- `--rand int` Random seed for reproducibility (default=1)
+- `--dump int` Number of empty/unlabeled images to remove (default=None)
 
 **Outputs:**
-- `/src/train/images/` Randomly selected training images
-- `/src/train/labels/` YOLO format labels corresponding to train
-- `/src/valid/images/` Randomly selected training images
-- `/src/valid/labels/` YOLO format labels corresponding to valid
-- `/src/test/images/` Randomly selected training images
-- `/src/test/labels/` YOLO format labels corresponding to test
+- `<out>/train/images/` Training set images (typically 70-80% of data)
+- `<out>/train/labels/` YOLO format labels for training set
+- `<out>/valid/images/` Validation set images (typically 10-20% of data)
+- `<out>/valid/labels/` YOLO format labels for validation set
+- `<out>/test/images/` Test set images (typically 10-20% of data, if enabled)
+- `<out>/test/labels/` YOLO format labels for test set
+- `<out>/data.yaml` Training configuration with paths and class information
+- `<out>/test.yaml` Testing configuration with paths and class information
+
+The script provides detailed statistics about:
+- Class distribution before and after splitting
+- Number of samples in each split
+- Any classes removed due to insufficient samples
+- Progress during file operations
+- Final class configuration and paths in YAML files
+
+For simple random splitting without class balancing, see the original `train_test_split.py`.
 
 ---
 ## 3. Training
@@ -322,23 +374,50 @@ Create a wandb account (www.wandb.ai) and login in terminal for visualisations
 wandb login
 ```
 
-### Train
-Edit the `training/train.py` to the parameters you need, then run **from the folder for results**. The default model is `yolov8m.pt`. See https://docs.ultralytics.com/models/yolov8/#performance-metrics for other Yolov8 pre-trained models. `data.yaml` generated by the `coco_to_yolo_format.py` is correctly formatted for the split and training. One may need to be generated/edited if downloaded bounding boxes straight from CVAT. See `examples/data.yaml` for an example file. 
+### Training Workflow
+The training process is now split into two steps:
 
-**Example usage:**
-```bash
-python <path_to_this_repo>/training/train.py --src /Dataset/data.yaml --name Animal_Train
-```
-***The outputs will be saved to the pwd (present working directory- path the script is being run from).***
+1. **Generate Training Configuration**
+   ```bash
+   python training/pre_train.py --data <path_to_data.yaml> --out <output_directory>
+   ```
+   This will:
+   - Create the output directory for training
+   - Generate a configuration file with:
+     - Dataset metadata and statistics
+     - Default training parameters with explanations
+     - Impact descriptions for each parameter
+   - Example:
+   ```bash
+   python training/pre_train.py --data Fish_Photo_Annotations_28feb25_YOLO_merged_split/data.yaml --out Fish_Photo_Annotations_28feb25_YOLO_merged_split_model
+   ```
 
+2. **Review and Start Training**
+   - Review the generated `train_config.txt` in your output directory
+   - Modify training parameters if needed (the file contains explanations and impact descriptions)
+   - Start training:
+   ```bash
+   python training/train.py --config <path_to_train_config.txt>
+   ```
+   - Example:
+   ```bash
+   python training/train.py --config Fish_Photo_Annotations_28feb25_YOLO_merged_split_model/train_config.txt
+   ```
 
-**Options:**
-- `--src str` Source YOLO yaml file describing train dataset
-- `--name str` Model name for saving
+The configuration file includes:
+- Metadata about the dataset
+- Dataset statistics (class distribution, image counts)
+- Customizable training parameters with descriptions:
+  - Model type (yolov8n.pt to yolov8x.pt)
+  - Image size
+  - Number of epochs
+  - Early stopping patience
+  - Batch size
+  - Learning rates
+  - Data augmentation settings
+  - And more...
 
-**Outputs:**
-- `/pwd/OK_CV/name/` Model training stats and outputs
-
+**Note**: The training outputs will be saved in the specified output directory under the `OK_CV` project folder.
 
 ## 4. Testing
 
