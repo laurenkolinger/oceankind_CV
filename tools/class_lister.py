@@ -26,8 +26,11 @@ def find_instances_json(directory: str) -> str:
         sys.exit(f"Error: Could not find instances_default.json at {expected_path}")
     return expected_path
 
-def parse_class_changes(file_path: str) -> Dict[str, str]:
-    """Parse class mappings from a Families_class_changes file"""
+def parse_class_changes(file_path: str) -> Dict[str, Dict[str, str]]:
+    """
+    Parse class mappings from a Families_class_changes file
+    Returns a dictionary with both ID mappings and name mappings
+    """
     try:
         with open(file_path, 'r') as f:
             content = f.read()
@@ -39,20 +42,27 @@ def parse_class_changes(file_path: str) -> Dict[str, str]:
             
         dict_str = dict_match.group(1)
         
-        # Parse the mappings
-        mappings = {}
+        # Parse the mappings and names
+        id_mappings = {}  # old_id -> new_id
+        name_mappings = {}  # class_name -> new_id
+        
         for line in dict_str.split('\n'):
             line = line.strip()
             if not line or line.startswith('#'):
                 continue
                 
-            # Extract the key-value pair
-            match = re.match(r"'(\d+)'\s*:\s*'(\d+|9)'", line)
+            # Extract the key-value pair and class name from comment
+            # Match patterns like: '0': '9', # AENA_Normal -> Spotted Eagle Ray
+            match = re.match(r"'(\d+)'\s*:\s*'(\d+|9)',\s*#\s*([A-Za-z0-9_]+)\s*->", line)
             if match:
-                old_class, new_class = match.groups()
-                mappings[old_class] = new_class
+                old_id, new_id, class_name = match.groups()
+                id_mappings[old_id] = new_id
+                name_mappings[class_name] = new_id
                 
-        return mappings
+        if not id_mappings:
+            sys.exit("No valid class mappings found in the file")
+                
+        return {'id_mappings': id_mappings, 'name_mappings': name_mappings}
         
     except Exception as e:
         sys.exit(f"Error parsing Families_class_changes file: {e}")
@@ -84,7 +94,13 @@ def extract_categories(data: Dict, sort_by_name: bool = False) -> List[Dict]:
     except KeyError:
         sys.exit("Error: instances.json does not contain 'categories' section")
 
-def generate_class_table(categories: List[Dict], output_path: str, existing_mappings: Optional[Dict[str, str]] = None):
+def extract_class_name(name: str) -> str:
+    """Extract the base class name before any modifiers"""
+    # Remove common modifiers like _Normal, _Dark, etc.
+    base_name = name.split('_')[0]
+    return base_name
+
+def generate_class_table(categories: List[Dict], output_path: str, existing_mappings: Optional[Dict[str, Dict[str, str]]] = None, sort_by_name: bool = False):
     """Generate a clean text file with class information and mapping template"""
     
     # Calculate maximum lengths for formatting
@@ -101,6 +117,7 @@ def generate_class_table(categories: List[Dict], output_path: str, existing_mapp
 # 1. First, define your new target classes in the "New Class Definitions" section below
 #    - New class IDs MUST start at 0 and be sequential (0, 1, 2, etc.)
 #    - Give each new class a descriptive label
+#    - Add more rows as needed, maintaining sequential IDs
 # 2. Then, in the "Class Mapping" section:
 #    - Review the current classes
 #    - In the "Map To Class" column, enter the new class ID from the definitions above
@@ -116,6 +133,11 @@ def generate_class_table(categories: List[Dict], output_path: str, existing_mapp
 # 2           | __________
 # 3           | __________
 # 4           | __________
+# 5           | __________
+# 6           | __________
+# 7           | __________
+# 8           | __________
+# 9           | __________
 # {'-' * 40}
 #
 # Class Mapping:
@@ -127,11 +149,23 @@ def generate_class_table(categories: List[Dict], output_path: str, existing_mapp
     rows = []
     for cat in categories:
         class_id = str(cat['id'])
-        # Get existing mapping if available
-        mapping = existing_mappings.get(class_id, '__________') if existing_mappings else '__________'
+        class_name = cat['name']
+        
+        # Get mapping based on sort mode
+        mapping = '__________'
+        if existing_mappings:
+            if sort_by_name:
+                # When sorting by name, use name mappings
+                if class_name in existing_mappings['name_mappings']:
+                    mapping = existing_mappings['name_mappings'][class_name]
+            else:
+                # When sorting by ID, use ID mappings
+                if class_id in existing_mappings['id_mappings']:
+                    mapping = existing_mappings['id_mappings'][class_id]
+        
         # Convert '9' to 'remove' for better clarity
         mapping = 'remove' if mapping == '9' else mapping
-        row = f"{class_id.ljust(max_id_len)} | {cat['name'].ljust(max_name_len)} | {mapping}"
+        row = f"{class_id.ljust(max_id_len)} | {class_name.ljust(max_name_len)} | {mapping}"
         rows.append(row)
 
     # Add footer with examples and note about existing mappings
@@ -141,32 +175,39 @@ def generate_class_table(categories: List[Dict], output_path: str, existing_mapp
 # Example:
 # New Class Definitions:
 # New Class ID | Class Label
-# 0           | Grouper
-# 1           | Snapper
-# 2           | Other Fish
+# 0           | Vehicle
+# 1           | Animal
+# 2           | Person
+# 3           | Object
 #
 # Class Mapping:
 # Class ID | Current Class Name     | Map To Class
-# 0        | Nassau_Grouper        | 0
-# 1        | Black_Grouper         | 0
-# 2        | Red_Snapper           | 1
-# 3        | Yellowtail_Snapper    | 1
-# 4        | Parrotfish            | 2
-# 5        | Barracuda             | 2
-# 6        | Trash                 | remove
+# 0        | car                    | 0
+# 1        | truck                  | 0
+# 2        | motorcycle             | 0
+# 3        | dog                    | 1
+# 4        | cat                    | 1
+# 5        | bird                   | 1
+# 6        | person                 | 2
+# 7        | pedestrian             | 2
+# 8        | chair                  | 3
+# 9        | table                  | 3
+# 10       | background             | remove
 #
 # The above example:
-# - Creates 3 new classes: Grouper (0), Snapper (1), and Other Fish (2)
-# - Merges both grouper species into class 0
-# - Merges both snapper species into class 1
-# - Merges other fish species into class 2
-# - Removes the 'Trash' class
+# - Creates 4 new classes: Vehicle (0), Animal (1), Person (2), and Object (3)
+# - Merges vehicle types into class 0
+# - Merges animal types into class 1
+# - Merges person types into class 2
+# - Merges furniture into class 3
+# - Removes background class
 """
 
     if existing_mappings:
         footer += """
 # Note: Existing mappings from Families_class_changes have been pre-filled.
 # Please review these mappings and ensure they align with your new class definitions.
+# Any blank mappings (__________) need to be filled in or marked as 'remove'.
 """
 
     # Write to file
@@ -192,7 +233,7 @@ def parse_args():
                        default=None)
     
     parser.add_argument('--sort-by-name',
-                       help='Sort classes alphabetically by name instead of by ID',
+                       help='Flag to sort classes alphabetically by name instead of by ID (no value needed)',
                        action='store_true')
     
     return parser.parse_args()
@@ -214,14 +255,14 @@ def main():
     if args.existing_mappings:
         print(f"Loading existing mappings from: {args.existing_mappings}")
         existing_mappings = parse_class_changes(args.existing_mappings)
-        print(f"Found {len(existing_mappings)} existing mappings")
+        print(f"Found {len(existing_mappings['id_mappings'])} existing mappings")
     
     # Load and process data
     data = load_instances_json(json_path)
     categories = extract_categories(data, args.sort_by_name)
     
     # Generate output
-    generate_class_table(categories, args.output, existing_mappings)
+    generate_class_table(categories, args.output, existing_mappings, args.sort_by_name)
     print(f"Generated class mapping template at: {args.output}")
     if existing_mappings:
         print("Existing mappings have been pre-filled. Please add class labels to complete the mapping.")
