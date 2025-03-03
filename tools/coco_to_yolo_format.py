@@ -6,6 +6,7 @@ Created: 23 July 2024
 
 ===
 Converts the Segment Anything Model (SAM) masks from CVAT in COCO format into YOLO compatible bounding boxes
+If there are multiple jsons and the classes do not all match, a "all_classes_dict.yaml" will be required
 ===
 
 """
