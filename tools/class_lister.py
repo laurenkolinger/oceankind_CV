@@ -98,16 +98,27 @@ def generate_class_table(categories: List[Dict], output_path: str, existing_mapp
 # Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 # 
 # Instructions:
-# 1. Review the current classes below
-# 2. In the "Map To Class" column:
-#    - Enter the new class ID to merge this class into
+# 1. First, define your new target classes in the "New Class Definitions" section below
+#    - New class IDs MUST start at 0 and be sequential (0, 1, 2, etc.)
+#    - Give each new class a descriptive label
+# 2. Then, in the "Class Mapping" section:
+#    - Review the current classes
+#    - In the "Map To Class" column, enter the new class ID to merge this class into
 #    - Leave blank to keep the class as is
 #    - Use 'remove' to exclude this class
-# 3. In the "New Class Label" column:
-#    - Enter a descriptive label for any new class IDs used
-#    - This helps document what each new class represents
 #
-# Format:
+# New Class Definitions:
+# {'-' * 40}
+# New Class ID | Class Label
+# {'-' * 40}
+# 0           | __________
+# 1           | __________
+# 2           | __________
+# 3           | __________
+# 4           | __________
+# {'-' * 40}
+#
+# Class Mapping:
 # {'-' * (max_id_len + max_name_len + 30)}
 # {'Class ID'.ljust(max_id_len)} | {'Current Class Name'.ljust(max_name_len)} | Map To Class | New Class Label
 # {'-' * (max_id_len + max_name_len + 30)}"""
@@ -127,23 +138,35 @@ def generate_class_table(categories: List[Dict], output_path: str, existing_mapp
     footer = f"""
 # {'-' * (max_id_len + max_name_len + 30)}
 #
-# Example mappings:
+# Example:
+# New Class Definitions:
+# New Class ID | Class Label
+# 0           | animals
+# 1           | people
+# 2           | vehicles
+#
+# Class Mapping:
 # Class ID | Current Class Name     | Map To Class | New Class Label
-# 0        | dog                    | 1            | animals
-# 1        | cat                    | 1            | animals
-# 2        | person                 | 2            | people
-# 3        | bicycle               | remove        | 
+# 0        | dog                    | 0            | animals
+# 1        | cat                    | 0            | animals
+# 2        | person                 | 1            | people
+# 3        | bicycle               | 2            | vehicles
+# 4        | motorcycle            | 2            | vehicles
+# 5        | bird                  | 0            | animals
+# 6        | trash                 | remove        | 
 #
 # The above example:
-# - Merges 'dog' and 'cat' into new class 1 labeled 'animals'
-# - Maps 'person' to new class 2 labeled 'people'
-# - Removes the 'bicycle' class
+# - Creates 3 new classes: animals (0), people (1), and vehicles (2)
+# - Merges 'dog', 'cat', and 'bird' into new class 0 (animals)
+# - Maps 'person' to new class 1 (people)
+# - Merges 'bicycle' and 'motorcycle' into new class 2 (vehicles)
+# - Removes the 'trash' class
 """
 
     if existing_mappings:
         footer += """
 # Note: Existing mappings from Families_class_changes have been pre-filled.
-# Please review these mappings and add appropriate class labels.
+# Please review these mappings and ensure they align with your new class definitions.
 """
 
     # Write to file
