@@ -103,7 +103,7 @@ def generate_class_table(categories: List[Dict], output_path: str, existing_mapp
 #    - Give each new class a descriptive label
 # 2. Then, in the "Class Mapping" section:
 #    - Review the current classes
-#    - In the "Map To Class" column, enter the new class ID to merge this class into
+#    - In the "Map To Class" column, enter the new class ID from the definitions above
 #    - Leave blank to keep the class as is
 #    - Use 'remove' to exclude this class
 #
@@ -119,9 +119,9 @@ def generate_class_table(categories: List[Dict], output_path: str, existing_mapp
 # {'-' * 40}
 #
 # Class Mapping:
-# {'-' * (max_id_len + max_name_len + 30)}
-# {'Class ID'.ljust(max_id_len)} | {'Current Class Name'.ljust(max_name_len)} | Map To Class | New Class Label
-# {'-' * (max_id_len + max_name_len + 30)}"""
+# {'-' * (max_id_len + max_name_len + 20)}
+# {'Class ID'.ljust(max_id_len)} | {'Current Class Name'.ljust(max_name_len)} | Map To Class
+# {'-' * (max_id_len + max_name_len + 20)}"""
 
     # Create class listing
     rows = []
@@ -131,36 +131,36 @@ def generate_class_table(categories: List[Dict], output_path: str, existing_mapp
         mapping = existing_mappings.get(class_id, '__________') if existing_mappings else '__________'
         # Convert '9' to 'remove' for better clarity
         mapping = 'remove' if mapping == '9' else mapping
-        row = f"{class_id.ljust(max_id_len)} | {cat['name'].ljust(max_name_len)} | {mapping.ljust(10)} | __________"
+        row = f"{class_id.ljust(max_id_len)} | {cat['name'].ljust(max_name_len)} | {mapping}"
         rows.append(row)
 
     # Add footer with examples and note about existing mappings
     footer = f"""
-# {'-' * (max_id_len + max_name_len + 30)}
+# {'-' * (max_id_len + max_name_len + 20)}
 #
 # Example:
 # New Class Definitions:
 # New Class ID | Class Label
-# 0           | animals
-# 1           | people
-# 2           | vehicles
+# 0           | Grouper
+# 1           | Snapper
+# 2           | Other Fish
 #
 # Class Mapping:
-# Class ID | Current Class Name     | Map To Class | New Class Label
-# 0        | dog                    | 0            | animals
-# 1        | cat                    | 0            | animals
-# 2        | person                 | 1            | people
-# 3        | bicycle               | 2            | vehicles
-# 4        | motorcycle            | 2            | vehicles
-# 5        | bird                  | 0            | animals
-# 6        | trash                 | remove        | 
+# Class ID | Current Class Name     | Map To Class
+# 0        | Nassau_Grouper        | 0
+# 1        | Black_Grouper         | 0
+# 2        | Red_Snapper           | 1
+# 3        | Yellowtail_Snapper    | 1
+# 4        | Parrotfish            | 2
+# 5        | Barracuda             | 2
+# 6        | Trash                 | remove
 #
 # The above example:
-# - Creates 3 new classes: animals (0), people (1), and vehicles (2)
-# - Merges 'dog', 'cat', and 'bird' into new class 0 (animals)
-# - Maps 'person' to new class 1 (people)
-# - Merges 'bicycle' and 'motorcycle' into new class 2 (vehicles)
-# - Removes the 'trash' class
+# - Creates 3 new classes: Grouper (0), Snapper (1), and Other Fish (2)
+# - Merges both grouper species into class 0
+# - Merges both snapper species into class 1
+# - Merges other fish species into class 2
+# - Removes the 'Trash' class
 """
 
     if existing_mappings:
