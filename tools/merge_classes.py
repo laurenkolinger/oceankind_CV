@@ -53,6 +53,7 @@ import sys
 import argparse
 import ast
 from typing import Dict, Optional, Tuple, List
+from datetime import datetime
 
 class mergeClasses():
     def __init__(self, labels_in: str, save: str, merge_file: Optional[str], 
@@ -115,48 +116,80 @@ class mergeClasses():
             with open(self.mapping_file, 'r') as f:
                 lines = f.readlines()
             
-            # Skip header until we find the divider
-            start_idx = 0
-            for i, line in enumerate(lines):
-                if line.strip().startswith('---'):
-                    start_idx = i + 1
-                    break
-            
-            # Process each line
-            for line in lines[start_idx:]:
-                # Skip comments, empty lines, and dividers
-                if line.strip().startswith('#') or not line.strip() or line.strip().startswith('---'):
-                    continue
-                    
-                # Split line into columns
-                parts = [p.strip() for p in line.split('|')]
-                if len(parts) != 4:
-                    continue
-                    
-                class_id, class_name, map_to, new_label = parts
+            # Parse New Class Definitions section
+            in_definitions = False
+            in_mapping = False
+            for line in lines:
+                line = line.strip()
                 
-                # Skip if no mapping specified
-                if map_to.strip() in ['__________', '']:
+                # Skip empty lines, dividers, and example lines (starting with ###)
+                if not line or all(c in '-' for c in line) or line.startswith('###'):
                     continue
-                    
-                # Handle 'remove' keyword
-                if map_to.strip().lower() == 'remove':
-                    mapping[class_id.strip()] = '-1'  # Use -1 to indicate removal
-                else:
-                    try:
-                        # Validate mapping is an integer
-                        new_class = str(int(map_to.strip()))
-                        mapping[class_id.strip()] = new_class
-                        
-                        # Store label if provided
-                        if new_label.strip() and new_label.strip() != '__________':
-                            labels[new_class] = new_label.strip()
-                    except ValueError:
-                        print(f"Warning: Invalid mapping '{map_to.strip()}' for class {class_id.strip()}, skipping")
+                
+                # Check for start/end of definitions section
+                if 'New Class ID | Class Label' in line:
+                    in_definitions = True
+                    in_mapping = False
+                    continue
+                
+                # Check for start of mapping section
+                if 'Class ID | Current Class Name | Map To Class' in line:
+                    in_definitions = False
+                    in_mapping = True
+                    continue
+                
+                if in_definitions:
+                    # Skip pure comment lines in definitions
+                    if line.startswith('#') and '|' not in line:
                         continue
+                        
+                    # Parse class definition line
+                    if line.startswith('#'):
+                        line = line[1:].strip()
+                        
+                    parts = [p.strip() for p in line.split('|')]
+                    if len(parts) == 2:
+                        class_id = parts[0].strip()
+                        class_label = parts[1].strip()
+                        # Only store if it's a valid label (not blank or placeholder)
+                        if class_label and class_label != '__________':
+                            labels[class_id] = class_label
+                            print(f"Found class label: {class_id} -> {class_label}")
+                
+                elif in_mapping:
+                    # Skip comment lines in mapping section
+                    if line.startswith('#'):
+                        continue
+                        
+                    # Parse mapping line
+                    parts = [p.strip() for p in line.split('|')]
+                    if len(parts) == 3:
+                        old_id = parts[0].strip()
+                        map_to = parts[2].strip()
+                        
+                        # Treat blank or __________ as 'remove'
+                        if map_to in ['__________', '']:
+                            mapping[old_id] = '-1'  # Use -1 to indicate removal
+                            print(f"Found removal (blank mapping): {old_id} -> remove")
+                        elif map_to.lower() == 'remove':
+                            mapping[old_id] = '-1'  # Use -1 to indicate removal
+                            print(f"Found removal (explicit): {old_id} -> remove")
+                        else:
+                            try:
+                                # Validate mapping is an integer
+                                new_class = str(int(map_to))
+                                mapping[old_id] = new_class
+                                print(f"Found mapping: {old_id} -> {new_class}")
+                            except ValueError:
+                                print(f"Warning: Invalid mapping '{map_to}' for class {old_id}, treating as remove")
+                                mapping[old_id] = '-1'
+                                continue
             
             if not mapping:
                 raise ValueError("No valid mappings found in file")
+            
+            print("\nFound labels:", labels)
+            print("Found mappings:", mapping)
                 
             return mapping, labels
             
@@ -281,13 +314,14 @@ class mergeClasses():
 
             to_merge = data_loaded['old_classes']
             new_classes = data_loaded['new_classes']
+            # Store the actual class labels for use in write_yaml
             self.new_cls = list(new_classes.values())
             
             new_class_mapping = {}
             for cls in to_merge:
                 if ',' not in str(to_merge[cls]):
                     sys.exit("class_merger.yaml not in correct format. Each old class must specify its new class ID after a comma.")
-                [n, merge] = str(to_merge[cls]).split(',')
+                [old_id, merge] = str(to_merge[cls]).split(',')
                 merge = int(merge)
                 if merge not in new_class_mapping:
                     new_class_mapping[merge] = [cls]
@@ -418,34 +452,35 @@ class mergeClasses():
                     sys.exit(f"ERROR: Not overwriting {path}. Please select different save path.")
                 print(f"Overwriting {os.path.basename(path)}")
 
-        # Create class enumeration
-        new_cls_enum = {k:v for k,v in enumerate(self.new_cls)}
-        
-        # Base configuration
+        # Get the labels from class_merger.yaml
+        with open(self.merge_file, 'r') as f:
+            merger_data = yaml.safe_load(f)
+            class_labels = merger_data['new_classes']
+
+        # Create sequential mapping starting at 0
+        new_cls_enum = {}
+        for i in range(len(class_labels)):
+            new_cls_enum[i] = class_labels[i]  # Use the label directly from new_classes
+
+        # Base configuration for both files
         base_config = {
-            "path": self.save,
-            "names": new_cls_enum
+            "names": new_cls_enum,
+            "nc": len(new_cls_enum),
+            "path": "../datasets/fish_photos",  # Default path relative to YOLOv5
+            "train": "images/train",
+            "val": "images/val",
+            "test": "images/test"
         }
 
-        # Data yaml for training
-        data = base_config.copy()
-        data.update({
-            "train": "train",
-            "val": "valid"
-        })
+        # Write data.yaml
+        with open(yaml_path, 'w') as f:
+            yaml.dump(base_config, f, sort_keys=False)
+            print(f"Created {os.path.basename(yaml_path)}")
 
-        # Test yaml for evaluation
-        test = base_config.copy()
-        test.update({
-            "train": "train",
-            "val": "test"
-        })
-
-        # Write files
-        for path, config in [(yaml_path, data), (test_yaml_path, test)]:
-            with open(path, 'w') as f:
-                yaml.dump(config, f, sort_keys=False)
-            print(f"Created {os.path.basename(path)}")
+        # Write test.yaml (same content for now)
+        with open(test_yaml_path, 'w') as f:
+            yaml.dump(base_config, f, sort_keys=False)
+            print(f"Created {os.path.basename(test_yaml_path)}")
 
     def run(self):
         """Main execution method"""
@@ -512,7 +547,46 @@ def main():
         if not mc.validate_class_mapping():
             sys.exit("Invalid class mapping in mapping file")
             
-        yaml_data = mc.dict_to_yaml_format(labels)
+        # Get all unique new class IDs that aren't removals
+        new_class_ids = sorted(set(int(v) for v in mapping.values() if v != '-1'))
+        
+        # Create new_classes dictionary using labels from the first table
+        new_classes = {}
+        for class_id in new_class_ids:
+            str_id = str(class_id)
+            if str_id in labels:
+                new_classes[class_id] = labels[str_id]  # Use the actual label from the first table
+            else:
+                print(f"Warning: No label found for new class ID {class_id}")
+                new_classes[class_id] = f"class_{class_id}"
+        
+        # Create old_classes dictionary with mapping and original names
+        old_classes = {}
+        for k, v in mapping.items():
+            if v != '-1':  # Skip removed classes
+                # Get the original class label from the first table
+                original_label = None
+                for line in open(args.mapping_file, 'r'):
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        parts = line.split('|')
+                        if len(parts) >= 2:
+                            id_str = parts[0].strip()
+                            label = parts[1].strip()
+                            if id_str == str(k):
+                                original_label = label
+                                break
+                
+                if original_label:
+                    old_classes[int(k)] = f"{original_label},{v}"  # Use original label and new ID
+                else:
+                    old_classes[int(k)] = f"class_{k},{v}"  # Fallback to generic name if label not found
+        
+        # Create class_merger.yaml with proper labels
+        yaml_data = {
+            "new_classes": new_classes,
+            "old_classes": old_classes
+        }
         yaml_path = os.path.join(args.save, "class_merger.yaml")
         
         # Create output directory if it doesn't exist

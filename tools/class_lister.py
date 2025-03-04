@@ -18,13 +18,21 @@ import sys
 import re
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+import yaml
 
 def find_instances_json(directory: str) -> str:
-    """Find instances_default.json in the annotations subfolder"""
-    expected_path = os.path.join(directory, "annotations", "instances_default.json")
-    if not os.path.exists(expected_path):
-        sys.exit(f"Error: Could not find instances_default.json at {expected_path}")
-    return expected_path
+    """Find instances_default.json or data.yaml in the directory"""
+    # First try data.yaml
+    yaml_path = os.path.join(directory, "data.yaml")
+    if os.path.exists(yaml_path):
+        return yaml_path
+        
+    # Fallback to instances_default.json
+    json_path = os.path.join(directory, "annotations", "instances_default.json")
+    if os.path.exists(json_path):
+        return json_path
+        
+    sys.exit(f"Error: Could not find data.yaml or instances_default.json in {directory}")
 
 def parse_class_changes(file_path: str) -> Dict[str, Dict[str, str]]:
     """
@@ -68,31 +76,46 @@ def parse_class_changes(file_path: str) -> Dict[str, Dict[str, str]]:
         sys.exit(f"Error parsing Families_class_changes file: {e}")
 
 def load_instances_json(json_path: str) -> Dict:
-    """Load and parse the COCO instances.json file"""
+    """Load and parse the COCO instances.json or YOLO data.yaml file"""
     try:
-        with open(json_path, 'r') as f:
-            data = json.load(f)
+        if json_path.endswith('.yaml') or json_path.endswith('.yml'):
+            with open(json_path, 'r') as f:
+                data = yaml.safe_load(f)
+        else:
+            with open(json_path, 'r') as f:
+                data = json.load(f)
         return data
     except Exception as e:
-        sys.exit(f"Error loading instances.json: {e}")
+        sys.exit(f"Error loading file: {e}")
 
 def extract_categories(data: Dict, sort_by_name: bool = False) -> List[Dict]:
     """
-    Extract category information from instances.json
+    Extract category information from instances.json or data.yaml
     
     Args:
-        data: The loaded JSON data
+        data: The loaded JSON data or YAML data
         sort_by_name: If True, sort categories alphabetically by name instead of by ID
     """
     try:
-        categories = data['categories']
+        # Check if this is YOLO data.yaml format
+        if 'names' in data:
+            categories = []
+            for id_str, name in data['names'].items():
+                categories.append({
+                    'id': int(id_str),
+                    'name': name
+                })
+        else:
+            # Fallback to COCO format
+            categories = data['categories']
+            
         # Sort either by ID (default) or by name
         if sort_by_name:
             return sorted(categories, key=lambda x: x['name'].lower())
         else:
             return sorted(categories, key=lambda x: x['id'])
     except KeyError:
-        sys.exit("Error: instances.json does not contain 'categories' section")
+        sys.exit("Error: Input file does not contain valid category information")
 
 def extract_class_name(name: str) -> str:
     """Extract the base class name before any modifiers"""
@@ -172,35 +195,41 @@ def generate_class_table(categories: List[Dict], output_path: str, existing_mapp
     footer = f"""
 # {'-' * (max_id_len + max_name_len + 20)}
 #
-# Example:
-# New Class Definitions:
-# New Class ID | Class Label
-# 0           | Vehicle
-# 1           | Animal
-# 2           | Person
-# 3           | Object
+### Example 1: Simple class merging
+### New Class Definitions:
+### New Class ID | Class Label
+### 0           | Vehicle
+### 1           | Animal
+### 2           | Person
+###
+### Class Mapping:
+### Class ID | Current Class Name     | Map To Class
+### 0        | car                    | 0
+### 1        | truck                  | 0
+### 2        | motorcycle             | 0
+### 3        | dog                    | 1
+### 4        | cat                    | 1
+### 5        | person                 | 2
+###
+### Example 2: Class removal and complex merging
+### New Class Definitions:
+### New Class ID | Class Label
+### 0           | Fish
+### 1           | Coral
+###
+### Class Mapping:
+### Class ID | Current Class Name     | Map To Class
+### 0        | grouper               | 0
+### 1        | snapper               | 0
+### 2        | parrotfish            | 0
+### 3        | soft_coral            | 1
+### 4        | hard_coral            | 1
+### 5        | background            | remove
+###
 #
-# Class Mapping:
-# Class ID | Current Class Name     | Map To Class
-# 0        | car                    | 0
-# 1        | truck                  | 0
-# 2        | motorcycle             | 0
-# 3        | dog                    | 1
-# 4        | cat                    | 1
-# 5        | bird                   | 1
-# 6        | person                 | 2
-# 7        | pedestrian             | 2
-# 8        | chair                  | 3
-# 9        | table                  | 3
-# 10       | background             | remove
-#
-# The above example:
-# - Creates 4 new classes: Vehicle (0), Animal (1), Person (2), and Object (3)
-# - Merges vehicle types into class 0
-# - Merges animal types into class 1
-# - Merges person types into class 2
-# - Merges furniture into class 3
-# - Removes background class
+# The examples above show:
+# 1. Simple merging of vehicle types, animals, and person classes
+# 2. Complex merging with class removal (background class)
 """
 
     if existing_mappings:
