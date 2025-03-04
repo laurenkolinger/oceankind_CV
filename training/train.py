@@ -19,6 +19,8 @@ def arg_parse():
     parser = argparse.ArgumentParser(description='Train YOLO Model')
     parser.add_argument("--config", dest="config",
             help="Path to training configuration file", required=True, type=str)
+    parser.add_argument("--project", dest="project_dir",
+            help="Directory to store training results (defaults to same directory as config file)", default=None, type=str)
     return parser.parse_args()
 
 def load_config(config_path):
@@ -142,6 +144,10 @@ def main():
     print("Loading configuration...")
     config = load_config(args.config)
     
+    # Set project directory to config file directory if not specified
+    if args.project_dir is None:
+        args.project_dir = os.path.dirname(os.path.abspath(args.config))
+    
     # Validate required fields
     required_fields = ['data_yaml', 'output_dir', 'model']
     missing_fields = [field for field in required_fields if field not in config]
@@ -157,6 +163,7 @@ def main():
     print(f"Configuration File: {os.path.abspath(args.config)}")
     print(f"Data YAML: {config['data_yaml']}")
     print(f"Output Directory: {config['output_dir']}")
+    print(f"Project Directory: {os.path.abspath(args.project_dir)}")
     print(f"Model: {config['model']}")
     
     print("\nTraining Parameters:")
@@ -168,6 +175,9 @@ def main():
     print("="*80 + "\n")
 
     try:
+        # Create project directory if it doesn't exist
+        os.makedirs(args.project_dir, exist_ok=True)
+        
         # Load model
         print("Loading model...")
         model = YOLO(config['model'])
@@ -184,7 +194,7 @@ def main():
             save=True,
             device=0,
             workers=config.get('workers', 8),
-            project='OK_CV',
+            project=args.project_dir,
             name=os.path.basename(config['output_dir']),
             val=True,
             lr0=config.get('lr0', 0.01),

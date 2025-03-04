@@ -54,11 +54,31 @@ def resolve_path(base_path, relative_path):
         print(f"Warning: Error resolving path {relative_path} relative to {base_path}: {e}")
         return None
 
+def count_class_distribution(labels_path):
+    """Count the distribution of classes in a labels directory"""
+    distribution = {}
+    if not labels_path or not os.path.exists(labels_path):
+        return distribution
+        
+    for label_file in os.listdir(labels_path):
+        if not label_file.endswith('.txt'):
+            continue
+            
+        with open(os.path.join(labels_path, label_file), 'r') as f:
+            for line in f:
+                if line.strip():
+                    class_id = line.strip().split()[0]
+                    distribution[class_id] = distribution.get(class_id, 0) + 1
+                    
+    return distribution
+
 def get_dataset_stats(data_yaml):
     """Get statistics about the dataset"""
     try:
         with open(data_yaml, 'r') as f:
             config = yaml.safe_load(f)
+            print("\nLoaded class names from data.yaml:")
+            print(config.get('names', {}))
         
         # Validate YAML structure
         validate_yaml_structure(config)
@@ -81,16 +101,23 @@ def get_dataset_stats(data_yaml):
             test_images_path = resolve_path(base_path, config['test'])
             test_labels_path = resolve_path(base_path, config['test'].replace('images', 'labels'))
         
-        # Count files
+        # Count files and class distributions
+        train_dist = count_class_distribution(train_labels_path)
+        val_dist = count_class_distribution(val_labels_path)
+        test_dist = count_class_distribution(test_labels_path) if test_labels_path else {}
+        
         stats = {
             'num_classes': len(config['names']),
             'class_names': config['names'],
             'train_images': count_files(train_images_path),
             'train_labels': count_files(train_labels_path),
+            'train_distribution': train_dist,
             'val_images': count_files(val_images_path),
             'val_labels': count_files(val_labels_path),
+            'val_distribution': val_dist,
             'test_images': count_files(test_images_path) if test_images_path else 0,
-            'test_labels': count_files(test_labels_path) if test_labels_path else 0
+            'test_labels': count_files(test_labels_path) if test_labels_path else 0,
+            'test_distribution': test_dist
         }
         
         # Print debug information
@@ -134,9 +161,28 @@ def generate_config_file(out_dir, data_yaml, stats, config):
             # Dataset statistics
             f.write("\n┌─ DATASET STATISTICS "+"─"*59+"┐\n")
             f.write(f"│ Number of Classes: {stats['num_classes']}\n")
-            f.write("│ Class Distribution:\n")
-            for i, name in enumerate(stats['class_names']):
-                f.write(f"│   • Class {i}: {name}\n")
+            f.write("│ Class Names and Distribution:\n")
+            
+            # Show distribution for each class across splits
+            for class_id in range(stats['num_classes']):
+                # Try both string and integer keys
+                class_name = stats['class_names'].get(str(class_id)) or stats['class_names'].get(class_id)
+                if class_name is None:
+                    print(f"Warning: No name found for class {class_id}")
+                    class_name = f"class_{class_id}"
+                
+                train_count = stats['train_distribution'].get(str(class_id), 0)
+                val_count = stats['val_distribution'].get(str(class_id), 0)
+                test_count = stats['test_distribution'].get(str(class_id), 0)
+                total = train_count + val_count + test_count
+                
+                f.write(f"│   • Class {class_id} ({class_name}):\n")
+                f.write(f"│     - Total: {total} instances\n")
+                f.write(f"│     - Training: {train_count} instances\n")
+                f.write(f"│     - Validation: {val_count} instances\n")
+                if stats['test_images'] > 0:
+                    f.write(f"│     - Test: {test_count} instances\n")
+            f.write("│\n")
             
             f.write("│\n│ Dataset Split:\n")
             f.write(f"│   • Training Set:    {stats['train_images']} images, {stats['train_labels']} labels\n")
@@ -261,11 +307,30 @@ def generate_config_file(out_dir, data_yaml, stats, config):
             f.write("DATASET STATISTICS:\n")
             f.write("-"*40 + "\n")
             f.write(f"Number of Classes: {stats['num_classes']}\n")
-            f.write("Class Distribution:\n")
-            for i, name in enumerate(stats['class_names']):
-                f.write(f"  * Class {i}: {name}\n")
+            f.write("Class Names and Distribution:\n")
             
-            f.write("\nDataset Split:\n")
+            # Show distribution for each class across splits
+            for class_id in range(stats['num_classes']):
+                class_name = stats['class_names'].get(str(class_id)) or stats['class_names'].get(class_id)
+                if class_name is None:
+                    print(f"Warning: No name found for class {class_id}")
+                    class_name = f"class_{class_id}"
+                
+                train_count = stats['train_distribution'].get(str(class_id), 0)
+                val_count = stats['val_distribution'].get(str(class_id), 0)
+                test_count = stats['test_distribution'].get(str(class_id), 0)
+                total = train_count + val_count + test_count
+                
+                f.write(f"  * Class {class_id} ({class_name}):\n")
+                f.write(f"    - Total: {total} instances\n")
+                f.write(f"    - Training: {train_count} instances\n")
+                f.write(f"    - Validation: {val_count} instances\n")
+                if stats['test_images'] > 0:
+                    f.write(f"    - Test: {test_count} instances\n")
+            f.write("\n")
+            
+            # Dataset split information
+            f.write("\nDataset Splits:\n")
             f.write(f"  * Training Set:    {stats['train_images']} images, {stats['train_labels']} labels\n")
             f.write(f"  * Validation Set:  {stats['val_images']} images, {stats['val_labels']} labels\n")
             if stats['test_images'] > 0:
